@@ -1,0 +1,37 @@
+
+Daily · YML
+# Save this file as: .github/workflows/daily.yml  (in your GitHub repo)
+#
+# This runs nse_trading_assistant.py automatically every weekday morning,
+# for free, using GitHub Actions' free tier (public repos: unlimited free
+# minutes; private repos: 2,000 free minutes/month, this job uses under
+# a minute a day -- nowhere close to the limit).
+#
+# No server, no VPS, no credit card.
+ 
+name: NSE Daily Trading Research
+ 
+on:
+  schedule:
+    # Cron is in UTC. 03:15 UTC = 08:45 IST. Runs Mon-Fri only.
+    - cron: "15 3 * * 1-5"
+  workflow_dispatch: {}   # lets you also trigger it manually from the GitHub UI, for testing
+ 
+jobs:
+  run-research:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+ 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+ 
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+ 
+      - name: Run daily research
+        run: python nse_trading_assistant.py --run-now
+ 
