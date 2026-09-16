@@ -103,7 +103,7 @@ WATCHLIST = [
 
 # ntfy.sh topic -- pick something private/hard to guess, subscribe to it
 # in the ntfy app. No account needed.
-NTFY_TOPIC = "PUT_YOUR_NTFY_TOPIC_HERE"
+   NTFY_TOPIC = "sam-nse-alerts-4471"
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 
 # Minimum composite score (0-100) required before the script will produce
