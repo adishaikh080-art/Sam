@@ -315,7 +315,6 @@ def build_signal(tech: dict, news: dict) -> dict:
     target_price = round(last_price + 1.5 * atr, 2)
     stop_loss_price = round(last_price - 1.0 * atr, 2)
     projected_return_pct = round((target_price - last_price) / last_price * 100, 2)
-    risk_pct = round((last_price - stop_loss_price) / last_price * 100, 2)
-
-   buy_zone_low = round(last_price * 0.998, 2)
-   buy_zone_high = round(last_price * 1.005, 2)
+    risk_pct = round((last_price - stop_loss_price) / last_price * 100, 2)  
+    buy_zone_low = round(last_price * 0.998, 2)   
+    buy_zone_high = round(last_price * 1.005, 2)
