@@ -103,7 +103,7 @@ WATCHLIST = [
 
 # ntfy.sh topic -- pick something private/hard to guess, subscribe to it
 # in the ntfy app. No account needed.
-NTFY_TOPIC = "sam-nse-alerts-4471"
+NTFY_TOPIC = "PUT_YOUR_NTFY_TOPIC_HERE"
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 
 # Minimum composite score (0-100) required before the script will produce
@@ -315,6 +315,173 @@ def build_signal(tech: dict, news: dict) -> dict:
     target_price = round(last_price + 1.5 * atr, 2)
     stop_loss_price = round(last_price - 1.0 * atr, 2)
     projected_return_pct = round((target_price - last_price) / last_price * 100, 2)
-    risk_pct = round((last_price - stop_loss_price) / last_price * 100, 2)  
-    buy_zone_low = round(last_price * 0.998, 2)   
+    risk_pct = round((last_price - stop_loss_price) / last_price * 100, 2)
+
+    buy_zone_low = round(last_price * 0.998, 2)
     buy_zone_high = round(last_price * 1.005, 2)
+
+    return {
+        "symbol": tech["symbol"],
+        "composite_score": round(composite_score, 1),
+        "buy_zone": f"{buy_zone_low} - {buy_zone_high}",
+        "buy_window": f"{BUY_WINDOW_START} - {BUY_WINDOW_END} IST",
+        "target_price": target_price,
+        "projected_return_pct": projected_return_pct,
+        "stop_loss_price": stop_loss_price,
+        "risk_pct": risk_pct,
+        "sell_by": f"{SELL_BY_TIME} IST",
+        "technical_reason": (
+            f"RSI {tech['rsi']}, "
+            f"{'fresh MACD bullish crossover, ' if tech['macd_bullish_cross'] else ''}"
+            f"volume {tech['volume_spike_ratio']}x 20-day average"
+        ),
+        "news_reason": news["reason"],
+    }
+
+
+def rank_candidates(watchlist: list[str]) -> list[dict]:
+    signals = []
+    for symbol in watchlist:
+        tech = technical_signal(symbol)
+        if tech is None:
+            continue
+        news = get_news_sentiment(symbol)
+        signals.append(build_signal(tech, news))
+        time.sleep(1)  # be polite to APIs
+    signals.sort(key=lambda s: s["composite_score"], reverse=True)
+    return signals
+
+
+# =============================================================================
+# NOTIFICATION + LOGGING
+# =============================================================================
+
+def format_message(signal: dict | None) -> str:
+    if signal is None:
+        return (
+            "NSE Daily Research -- No trade today\n\n"
+            "No candidate cleared the quality bar. Best to sit this one out.\n\n"
+            f"{DISCLAIMER}"
+        )
+    return (
+        f"NSE Daily Pick: {signal['symbol'].replace('.NS','')}\n\n"
+        f"Buy zone: Rs {signal['buy_zone']}\n"
+        f"Buy window: {signal['buy_window']}\n"
+        f"Target: Rs {signal['target_price']} (~{signal['projected_return_pct']}% projected)\n"
+        f"Stop-loss: Rs {signal['stop_loss_price']} (~{signal['risk_pct']}% risk)\n"
+        f"Sell by: {signal['sell_by']}\n\n"
+        f"Why: {signal['technical_reason']}. {signal['news_reason']}\n"
+        f"Confidence score: {signal['composite_score']}/100\n\n"
+        f"{DISCLAIMER}"
+    )
+
+
+def send_notification(signal: dict | None):
+    title = "NSE Pick" if signal else "NSE: No Trade Today"
+    message = format_message(signal)
+    if NTFY_TOPIC == "PUT_YOUR_NTFY_TOPIC_HERE":
+        print("[warn] NTFY_TOPIC not configured -- printing instead of pushing:\n")
+        print(message)
+        return
+    try:
+        requests.post(
+            NTFY_URL,
+            data=message.encode("utf-8"),
+            headers={"Title": title, "Priority": "default"},
+            timeout=15,
+        )
+    except Exception as e:
+        print(f"[warn] failed to send notification: {e}")
+        print(message)
+
+
+def log_pick(signal: dict | None):
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not LOG_FILE.exists()
+    with open(LOG_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
+        if is_new:
+            writer.writerow([
+                "date", "symbol", "composite_score", "buy_zone", "target_price",
+                "projected_return_pct", "stop_loss_price", "risk_pct",
+                "actual_outcome_pct", "notes",
+            ])
+        if signal is None:
+            writer.writerow([datetime.now().date(), "NO_TRADE", "", "", "", "", "", "", "", ""])
+        else:
+            writer.writerow([
+                datetime.now().date(), signal["symbol"], signal["composite_score"],
+                signal["buy_zone"], signal["target_price"], signal["projected_return_pct"],
+                signal["stop_loss_price"], signal["risk_pct"], "", "",
+            ])
+    print(f"[info] logged pick to {LOG_FILE}")
+    print("[info] fill in 'actual_outcome_pct' yourself after the trading day "
+          "to build a real accuracy track record over time.")
+
+
+# =============================================================================
+# MAIN PIPELINE
+# =============================================================================
+
+def run_once():
+    print(f"[info] starting run at {datetime.now()}")
+    ranked = rank_candidates(WATCHLIST)
+    if not ranked:
+        print("[warn] no data fetched for any watchlist stock -- check network/tickers")
+        return
+
+    best = ranked[0]
+    print("[info] top candidates:")
+    for s in ranked[:5]:
+        print(f"   {s['symbol']}: score {s['composite_score']}")
+
+    if best["composite_score"] < MIN_SCORE_TO_TRADE:
+        print(f"[info] best score {best['composite_score']} below bar "
+              f"{MIN_SCORE_TO_TRADE} -- sending 'no trade' notification")
+        send_notification(None)
+        log_pick(None)
+    else:
+        send_notification(best)
+        log_pick(best)
+
+    print("[info] run complete")
+
+
+def run_scheduled():
+    import schedule
+    schedule.every().monday.at("08:45").do(run_once)
+    schedule.every().tuesday.at("08:45").do(run_once)
+    schedule.every().wednesday.at("08:45").do(run_once)
+    schedule.every().thursday.at("08:45").do(run_once)
+    schedule.every().friday.at("08:45").do(run_once)
+    print("[info] scheduler started, waiting for 08:45 IST Mon-Fri...")
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-now", action="store_true", help="run the pipeline once immediately")
+    parser.add_argument("--schedule", action="store_true", help="run continuously, self-scheduling")
+    args = parser.parse_args()
+
+    if args.run_now:
+        run_once()
+    elif args.schedule:
+        run_scheduled()
+    else:
+        print("Usage: python nse_trading_assistant.py --run-now   (test immediately)")
+        print("       python nse_trading_assistant.py --schedule  (run continuously)")
+        sys.exit(1)
+
+
+# =============================================================================
+# requirements.txt contents (save separately as requirements.txt):
+#
+# yfinance
+# pandas
+# numpy
+# requests
+# schedule
+# =============================================================================
